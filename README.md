@@ -56,11 +56,26 @@ Without GPT parser:
 python omega.py
 ```
 
+Without microphone (text mode):
+
+```bash
+python omega.py --text-mode
+```
+
 With GPT parser (Phase 5):
 
 ```bash
 python omega.py --use-gpt
 ```
+
+With GPT + text mode:
+
+```bash
+python omega.py --use-gpt --text-mode
+```
+
+Note:
+- If no microphone is detected, Omega automatically falls back to text mode.
 
 ## Phase Coverage
 
