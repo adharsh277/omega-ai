@@ -39,14 +39,17 @@ class OmegaAssistant:
         self.engine = None
         self.use_gpt = use_gpt
         self.text_mode = text_mode
-        self.tts_enabled = not text_mode
+        self.tts_enabled = True
         self.openweather_api_key = os.getenv("OPENWEATHER_API_KEY", "")
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
+
+        if not self.has_speaker():
+            print("Omega: No speaker detected. Voice output disabled.")
+            self.tts_enabled = False
 
         if not self.text_mode and not self.has_microphone():
             print("Omega: No microphone detected. Switching to text mode.")
             self.text_mode = True
-            self.tts_enabled = False
 
     def speak(self, text: str) -> None:
         print(f"Omega: {text}")
@@ -88,6 +91,19 @@ class OmegaAssistant:
         except Exception:
             return False
 
+    def has_speaker(self) -> bool:
+        if platform.system().lower() == "linux":
+            cards_path = "/proc/asound/cards"
+            if not os.path.exists(cards_path):
+                return False
+            try:
+                with open(cards_path, "r", encoding="utf-8") as cards_file:
+                    cards_text = cards_file.read().strip().lower()
+                return bool(cards_text) and "no soundcards" not in cards_text
+            except Exception:
+                return False
+        return True
+
     def listen(self, timeout: int = 5, phrase_time_limit: int = 8) -> str:
         if self.text_mode:
             try:
@@ -117,7 +133,6 @@ class OmegaAssistant:
             return ""
         except (OSError, AttributeError):
             self.text_mode = True
-            self.tts_enabled = False
             self.speak("Microphone is not available. Switching to text mode.")
             return self.listen(timeout=timeout, phrase_time_limit=phrase_time_limit)
 
