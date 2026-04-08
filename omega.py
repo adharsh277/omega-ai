@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import contextlib
 import json
 import os
 import platform
@@ -32,20 +33,70 @@ class Action:
 
 
 class OmegaAssistant:
-    def __init__(self, wake_word: str = WAKE_WORD, use_gpt: bool = False):
+    def __init__(self, wake_word: str = WAKE_WORD, use_gpt: bool = False, text_mode: bool = False):
         self.wake_word = wake_word.lower()
         self.recognizer = sr.Recognizer()
-        self.engine = pyttsx3.init()
+        self.engine = None
         self.use_gpt = use_gpt
+        self.text_mode = text_mode
+        self.tts_enabled = not text_mode
         self.openweather_api_key = os.getenv("OPENWEATHER_API_KEY", "")
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
 
+        if not self.text_mode and not self.has_microphone():
+            print("Omega: No microphone detected. Switching to text mode.")
+            self.text_mode = True
+            self.tts_enabled = False
+
     def speak(self, text: str) -> None:
         print(f"Omega: {text}")
-        self.engine.say(text)
-        self.engine.runAndWait()
+        if not self.tts_enabled:
+            return
+
+        if self.engine is None:
+            try:
+                with open(os.devnull, "w", encoding="utf-8") as devnull, contextlib.redirect_stderr(devnull):
+                    self.engine = pyttsx3.init()
+            except Exception:
+                self.tts_enabled = False
+                return
+
+        try:
+            with open(os.devnull, "w", encoding="utf-8") as devnull, contextlib.redirect_stderr(devnull):
+                self.engine.say(text)
+                self.engine.runAndWait()
+        except Exception:
+            # Disable TTS after first failure so the assistant can keep running.
+            self.tts_enabled = False
+
+    def has_microphone(self) -> bool:
+        if platform.system().lower() == "linux":
+            cards_path = "/proc/asound/cards"
+            if not os.path.exists(cards_path):
+                return False
+            try:
+                with open(cards_path, "r", encoding="utf-8") as cards_file:
+                    cards_text = cards_file.read().strip().lower()
+                if not cards_text or "no soundcards" in cards_text:
+                    return False
+            except Exception:
+                return False
+
+        try:
+            with open(os.devnull, "w", encoding="utf-8") as devnull, contextlib.redirect_stderr(devnull):
+                return len(sr.Microphone.list_microphone_names()) > 0
+        except Exception:
+            return False
 
     def listen(self, timeout: int = 5, phrase_time_limit: int = 8) -> str:
+        if self.text_mode:
+            try:
+                text = input("You: ").lower().strip()
+                print(f"You typed: {text}")
+                return text
+            except EOFError:
+                return "stop"
+
         with sr.Microphone() as source:
             self.recognizer.adjust_for_ambient_noise(source, duration=0.4)
             print("Listening...")
@@ -64,6 +115,11 @@ class OmegaAssistant:
         except sr.RequestError:
             self.speak("Speech service is unavailable right now.")
             return ""
+        except (OSError, AttributeError):
+            self.text_mode = True
+            self.tts_enabled = False
+            self.speak("Microphone is not available. Switching to text mode.")
+            return self.listen(timeout=timeout, phrase_time_limit=phrase_time_limit)
 
     def has_wake_word(self, text: str) -> bool:
         return self.wake_word in text
@@ -89,6 +145,12 @@ class OmegaAssistant:
 
     def parse_with_rules(self, text: str) -> Action:
         normalized = self.normalize(text)
+
+        if any(word in normalized for word in ["hello", "hi", "hey"]):
+            return Action("greet", {})
+
+        if any(phrase in normalized for phrase in ["help", "commands", "what can you do"]):
+            return Action("help", {})
 
         if any(word in normalized for word in ["stop", "exit", "quit", "goodbye"]):
             return Action("stop", {})
@@ -351,6 +413,16 @@ class OmegaAssistant:
             self.speak("Media controls are not available")
 
     def execute(self, action: Action) -> bool:
+        if action.name == "greet":
+            self.speak("Hi, I am Omega. Say help to hear supported commands.")
+            return True
+
+        if action.name == "help":
+            self.speak(
+                "You can say: open chrome, open spotify, what time is it, search for something, weather in a city, volume up or down, mute, pause music, close app, or stop"
+            )
+            return True
+
         if action.name == "open_app":
             self.open_app(action.params.get("app", ""))
             return True
@@ -398,14 +470,31 @@ class OmegaAssistant:
             self.speak("Goodbye")
             return False
 
-        self.speak("Sorry, I didn't understand that")
+        self.speak("I did not understand. Say help to hear supported commands.")
         return True
 
     def run(self) -> None:
+        if self.text_mode:
+            self.speak("Text mode is active. Type commands directly. Example: what time is it, or stop.")
         self.speak("Omega online")
         while True:
             heard = self.listen()
             if not heard:
+                continue
+
+            if self.text_mode:
+                command = heard
+                if self.has_wake_word(heard):
+                    command = re.sub(rf"\b{re.escape(self.wake_word)}\b", "", heard, count=1).strip(" ,.!?")
+
+                if not command:
+                    self.speak("Yes, how can I help?")
+                    command = self.listen()
+
+                action = self.parse_command(command)
+                should_continue = self.execute(action)
+                if not should_continue:
+                    break
                 continue
 
             if not self.has_wake_word(heard):
@@ -430,9 +519,14 @@ def main() -> None:
         action="store_true",
         help="Enable GPT-based intent parsing (requires OPENAI_API_KEY and openai package)",
     )
+    parser.add_argument(
+        "--text-mode",
+        action="store_true",
+        help="Use keyboard input instead of microphone",
+    )
     args = parser.parse_args()
 
-    assistant = OmegaAssistant(use_gpt=args.use_gpt)
+    assistant = OmegaAssistant(use_gpt=args.use_gpt, text_mode=args.text_mode)
     assistant.run()
 
 
