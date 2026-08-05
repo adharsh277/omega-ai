@@ -6,9 +6,7 @@ This project implements your Omega build plan in the same phase order, from a ba
 
 - Python
 - SpeechRecognition
-
 - pyttsx3
-- 
 - rapidfuzz (flexible command matching)
 - requests (OpenWeather + Google search URL handling)
 - keyboard, pyautogui (system/media control)
