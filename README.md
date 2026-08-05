@@ -1,6 +1,7 @@
 # Omega AI (Phase-Wise Voice Assistant)
 
 This project implements your Omega build plan in the same phase order, from a basic wake-word assistant to optional GPT-based intent parsing.
+
 ## Stack
 
 - Python
